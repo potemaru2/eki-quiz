@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>実在する駅名はどっち? — AI協働実験室</title>
+<meta name="description" content="片方は実在する駅、片方はAIが作った架空の駅。発車までに見抜いて、どこまで遠くへ行けるか。">
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    min-height: 100vh;
+    background: #E9E7E1;
+    font-family: 'Hiragino Kaku Gothic ProN', 'Yu Gothic', 'Meiryo', sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    color: #1A1A1A;
+  }
+  #app { width: 100%; max-width: 430px; flex: 1; padding: 16px 16px 0; }
+  .tactile {
+    width: 100%; height: 18px; margin-top: 22px;
+    background: repeating-linear-gradient(90deg,#E8B824 0 22px,#D9A917 22px 26px);
+    box-shadow: inset 0 2px 3px rgba(0,0,0,0.15);
+  }
+  .edge { width: 100%; height: 26px; background: #5B5A56; }
+
+  .sign {
+    display: block; width: 100%;
+    background: #FBFAF7; border: 1px solid #C9C7C0; border-radius: 10px;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.15);
+    padding: 13px 12px 0; text-align: center; cursor: pointer;
+    font-family: inherit; position: relative; overflow: hidden;
+  }
+  .sign:active { transform: scale(0.99); }
+  .sign.correct { border: 3px solid #2E7D46; box-shadow: 0 0 0 4px rgba(46,125,70,0.25), 0 4px 14px rgba(0,0,0,0.18); animation: pop 0.3s ease; }
+  .sign.wrong   { border: 3px solid #B3342E; box-shadow: 0 0 0 4px rgba(179,52,46,0.22), 0 4px 14px rgba(0,0,0,0.18); animation: shake 0.35s ease; }
+  .sign .kana   { font-size: 13px; letter-spacing: 0.35em; color: #3A3A3A; min-height: 18px; }
+  .sign .kanji  { font-size: 40px; font-weight: 900; color: #111; line-height: 1.25; margin: 2px 0; letter-spacing: 0.1em; }
+  .sign .romaji { font-size: 12px; letter-spacing: 0.18em; color: #555; text-transform: uppercase; margin-bottom: 10px; }
+  .sign .hidden-txt { color: #B7B5AE !important; }
+  .sign .ribbon { font-size: 12.5px; font-weight: 700; padding: 6px 8px; color: #FBFAF7; line-height: 1.55; text-align: left; }
+  .sign .stripe { height: 8px; background: linear-gradient(90deg,#2E7D46,#3E9A5C); margin: 0 -12px; }
+
+  .btn-primary {
+    width: 100%; padding: 15px; font-size: 16px; font-weight: 700;
+    color: #FBFAF7; background: #1B2A52; border: none; border-radius: 10px;
+    cursor: pointer; letter-spacing: 0.1em; font-family: inherit;
+  }
+  .btn-outline {
+    width: 100%; padding: 13px; font-size: 15px; font-weight: 700;
+    color: #1B2A52; background: #FBFAF7; border: 2px solid #1B2A52; border-radius: 10px;
+    cursor: pointer; font-family: inherit;
+  }
+  .btn-ghost {
+    width: 100%; padding: 12px; font-size: 14px; font-weight: 700;
+    color: #6B6A65; background: transparent; border: 1.5px solid #9A9892; border-radius: 10px;
+    cursor: pointer; font-family: inherit;
+  }
+  .link-quit {
+    border: none; background: transparent; font-size: 12px; color: #8A8983;
+    text-decoration: underline; cursor: pointer; font-family: inherit;
+  }
+
+  @keyframes pop { 0%{transform:scale(1)} 40%{transform:scale(1.03)} 100%{transform:scale(1)} }
+  @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-5px)} 75%{transform:translateX(5px)} }
+  @keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(27,42,82,0.35)} 50%{box-shadow:0 0 0 6px rgba(27,42,82,0)} }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="tactile"></div>
+<div class="edge"></div>
+
+<script>
+"use strict";
+// ============================================================
+// 実在する駅名はどっち? — AI協働実験室 実験①(公開版)
+// ============================================================
+
+var REAL_STATIONS = [
+  { kanji: "南蛇井", kana: "なんじゃい", romaji: "Nanjai", line: "上信電鉄", pref: "群馬県", trivia: "「なんじゃい?」と聞き返したくなる、難読駅の横綱格。" },
+  { kanji: "半家", kana: "はげ", romaji: "Hage", line: "JR予土線", pref: "高知県", trivia: "平家の落人が「平」の字を変えて隠れ住んだという伝説がある。" },
+  { kanji: "特牛", kana: "こっとい", romaji: "Kottoi", line: "JR山陰本線", pref: "山口県", trivia: "強く立派な牡牛を指す方言「ことい」が由来とされる。" },
+  { kanji: "及位", kana: "のぞき", romaji: "Nozoki", line: "JR奥羽本線", pref: "山形県", trivia: "崖から谷を「のぞく」修験道の荒行に由来するとされる。" },
+  { kanji: "飯山満", kana: "はさま", romaji: "Hasama", line: "東葉高速鉄道", pref: "千葉県", trivia: "首都圏に潜む初見殺し。谷あいの「狭間」が由来とされる。" },
+  { kanji: "後免", kana: "ごめん", romaji: "Gomen", line: "JR土讃線", pref: "高知県", trivia: "年貢御免の地が由来。「ごめん駅」として愛されている。" },
+  { kanji: "大歩危", kana: "おおぼけ", romaji: "Oboke", line: "JR土讃線", pref: "徳島県", trivia: "「大股で歩くと危ない」渓谷が名前の由来という説がある。" },
+  { kanji: "母恋", kana: "ぼこい", romaji: "Bokoi", line: "JR室蘭本線", pref: "北海道", trivia: "アイヌ語「ポクオイ」由来。母の日は記念入場券が人気。" },
+  { kanji: "驫木", kana: "とどろき", romaji: "Todoroki", line: "JR五能線", pref: "青森県", trivia: "馬を3つ重ねて「とどろき」。日本海の波音がとどろく無人駅。" },
+  { kanji: "撫牛子", kana: "ないじょうし", romaji: "Naijoshi", line: "JR奥羽本線", pref: "青森県", trivia: "全国屈指の難読駅。初見で読めたら自慢していい。" },
+  { kanji: "雑餉隈", kana: "ざっしょのくま", romaji: "Zasshonokuma", line: "西鉄天神大牟田線", pref: "福岡県", trivia: "九州難読駅の代表格。食事を意味する「雑餉」から。" },
+  { kanji: "上下", kana: "じょうげ", romaji: "Joge", line: "JR福塩線", pref: "広島県", trivia: "分水嶺の町・上下町にある。雨水が上と下に分かれて流れる。" },
+  { kanji: "男衾", kana: "おぶすま", romaji: "Obusuma", line: "東武東上線", pref: "埼玉県", trivia: "鎌倉時代の絵巻「男衾三郎絵詞」にも残る古い地名。" },
+  { kanji: "比羅夫", kana: "ひらふ", romaji: "Hirafu", line: "JR函館本線", pref: "北海道", trivia: "駅舎に宿泊できる駅として鉄道ファンに有名。" },
+  { kanji: "田本", kana: "たもと", romaji: "Tamoto", line: "JR飯田線", pref: "長野県", trivia: "崖に張り付くホームで有名な秘境駅ランキングの常連。" },
+  { kanji: "為栗", kana: "してぐり", romaji: "Shiteguri", line: "JR飯田線", pref: "長野県", trivia: "読めたら鉄道ファン確定。天竜川を望む秘境駅。" },
+  { kanji: "中井侍", kana: "なかいさむらい", romaji: "Nakaisamurai", line: "JR飯田線", pref: "長野県", trivia: "長野県最南端の駅。茶畑の急斜面にぽつんとある。" },
+  { kanji: "京終", kana: "きょうばて", romaji: "Kyobate", line: "JR桜井線", pref: "奈良県", trivia: "平城京の「果て」に位置したことが名前の由来とされる。" },
+  { kanji: "帯解", kana: "おびとけ", romaji: "Obitoke", line: "JR桜井線", pref: "奈良県", trivia: "安産祈願で知られる帯解寺の最寄り駅。" },
+  { kanji: "巻向", kana: "まきむく", romaji: "Makimuku", line: "JR桜井線", pref: "奈良県", trivia: "邪馬台国の有力候補・纒向遺跡のすぐそば。" },
+  { kanji: "恋山形", kana: "こいやまがた", romaji: "Koiyamagata", line: "智頭急行", pref: "鳥取県", trivia: "「恋がかなう駅」として駅全体がピンク色に塗られている。" },
+  { kanji: "宗太郎", kana: "そうたろう", romaji: "Sotaro", line: "JR日豊本線", pref: "大分県", trivia: "普通列車が1日数本しか停まらない九州屈指の秘境駅。" },
+  { kanji: "十二兼", kana: "じゅうにかね", romaji: "Junikane", line: "JR中央本線", pref: "長野県", trivia: "木曽路の小駅。由来は諸説あるミステリアスな駅名。" },
+  { kanji: "風合瀬", kana: "かそせ", romaji: "Kasose", line: "JR五能線", pref: "青森県", trivia: "日本海の絶景を望む五能線の難読駅。" },
+  { kanji: "動橋", kana: "いぶりはし", romaji: "Iburihashi", line: "IRいしかわ鉄道", pref: "石川県", trivia: "揺れ動く橋「いぶり橋」が由来とされる加賀の駅。" },
+  { kanji: "浪花", kana: "なにわ", romaji: "Namihana", line: "いすみ鉄道", pref: "千葉県", trivia: "大阪ではなく千葉県にある「なにわ」。" }
+];
+
+var FAKE_STATIONS = [
+  { kanji: "苅野辺", kana: "かりのべ", romaji: "Karinobe" },
+  { kanji: "汐見潟", kana: "しおみがた", romaji: "Shiomigata" },
+  { kanji: "樫尾峠", kana: "かしおとうげ", romaji: "Kashiotoge" },
+  { kanji: "綿貫野", kana: "わたぬきの", romaji: "Watanukino" },
+  { kanji: "鷹待", kana: "たかまち", romaji: "Takamachi" },
+  { kanji: "雁待", kana: "かりまち", romaji: "Karimachi" },
+  { kanji: "月舟", kana: "つきふね", romaji: "Tsukifune" },
+  { kanji: "早瀬野", kana: "はやせの", romaji: "Hayaseno" },
+  { kanji: "木漏田", kana: "こもれだ", romaji: "Komoreda" },
+  { kanji: "五月雨", kana: "さみだれ", romaji: "Samidare" },
+  { kanji: "錆浜", kana: "さびはま", romaji: "Sabihama" },
+  { kanji: "鶴喰", kana: "つるばみ", romaji: "Tsurubami" },
+  { kanji: "真名井原", kana: "まないはら", romaji: "Manaihara" },
+  { kanji: "霧待", kana: "きりまち", romaji: "Kirimachi" },
+  { kanji: "白狐台", kana: "びゃっこだい", romaji: "Byakkodai" },
+  { kanji: "忘水", kana: "わすれみず", romaji: "Wasuremizu" },
+  { kanji: "苫栗", kana: "とまぐり", romaji: "Tomaguri" },
+  { kanji: "篠懸野", kana: "すずかけの", romaji: "Suzukakeno" },
+  { kanji: "雨隠", kana: "あまがくり", romaji: "Amagakuri" },
+  { kanji: "稲架掛", kana: "はさがけ", romaji: "Hasagake" },
+  { kanji: "椋鳥丘", kana: "むくどりがおか", romaji: "Mukudorigaoka" },
+  { kanji: "火振", kana: "ひぶり", romaji: "Hiburi" },
+  { kanji: "月待坂", kana: "つきまちざか", romaji: "Tsukimachizaka" },
+  { kanji: "燕沢", kana: "つばめさわ", romaji: "Tsubamesawa" }
+];
+
+var TOTAL = 10;
+var MILESTONES = [
+  { km: 0, label: "東京" }, { km: 104, label: "熱海" }, { km: 366, label: "名古屋" },
+  { km: 552, label: "新大阪" }, { km: 894, label: "広島" }, { km: 1175, label: "博多" }
+];
+var MAP_MAX = 1250;
+
+function timeForStreak(s) { return s >= 9 ? 3 : s >= 8 ? 5 : s >= 6 ? 7 : s >= 4 ? 8 : s >= 2 ? 9 : 10; }
+function rankMult(s) { return s >= 9 ? 4.0 : s >= 8 ? 3.0 : s >= 6 ? 2.0 : s >= 4 ? 1.5 : s >= 2 ? 1.2 : 1.0; }
+function trainRank(s) {
+  if (s >= 9) return { name: "リニア", color: "#6B2FA0", emoji: "🚄" };
+  if (s >= 8) return { name: "のぞみ", color: "#1B5FAA", emoji: "🚄" };
+  if (s >= 6) return { name: "特急", color: "#B3342E", emoji: "🚈" };
+  if (s >= 4) return { name: "急行", color: "#C46A1B", emoji: "🚃" };
+  if (s >= 2) return { name: "快速", color: "#2E7D46", emoji: "🚃" };
+  return { name: "各駅停車", color: "#6B6A65", emoji: "🚃" };
+}
+function titleForScore(s) {
+  if (s === 10) return { name: "鉄道の神", desc: "全問正解。あなたに偽駅名は通用しない" };
+  if (s >= 8) return { name: "駅名マスター", desc: "日本の駅をよく知っている" };
+  if (s >= 6) return { name: "旅慣れた人", desc: "鼻が利く。惜しい取りこぼしあり" };
+  if (s >= 4) return { name: "一般乗客", desc: "五分五分。AIの偽駅もなかなかやる" };
+  return { name: "AIに翻弄された人", desc: "架空の駅で降りようとしています" };
+}
+function distanceComment(km) {
+  if (km >= 1500) return "日本縦断級の大旅行です";
+  if (km >= 1000) return "東京→博多(約1,175km)級";
+  if (km >= 750) return "東京→広島(約894km)クラス";
+  if (km >= 550) return "東京→新大阪(約552km)を突破";
+  if (km >= 350) return "東京→名古屋(約366km)クラス";
+  if (km >= 200) return "東京→浜松あたりまで来ました";
+  if (km >= 100) return "東京→熱海(約104km)クラス";
+  return "まだ小田原にも届いていません…";
+}
+function shuffle(a) {
+  a = a.slice();
+  for (var i = a.length - 1; i > 0; i--) {
+    var j = Math.floor(Math.random() * (i + 1));
+    var t = a[i]; a[i] = a[j]; a[j] = t;
+  }
+  return a;
+}
+function buildRounds() {
+  var reals = shuffle(REAL_STATIONS).slice(0, TOTAL);
+  var fakes = shuffle(FAKE_STATIONS).slice(0, TOTAL);
+  var fogIdx = shuffle([3,4,5,6,7,8,9]).slice(0, 2);
+  return reals.map(function (real, i) {
+    return {
+      real: real, fake: fakes[i],
+      realFirst: Math.random() < 0.5,
+      fog: fogIdx.indexOf(i) >= 0 ? (Math.random() < 0.5 ? "kana" : "kanji") : null
+    };
+  });
+}
+
+// ---- 効果音 ----
+var audioCtx = null, muted = false;
+function ensureAudio() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    return audioCtx;
+  } catch (e) { return null; }
+}
+function toneAt(freq, start, dur, type, gain) {
+  var ctx = ensureAudio(); if (!ctx || muted) return;
+  try {
+    var o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type || "sine"; o.frequency.value = freq;
+    g.gain.setValueAtTime(gain || 0.12, ctx.currentTime + start);
+    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + dur);
+    o.connect(g); g.connect(ctx.destination);
+    o.start(ctx.currentTime + start); o.stop(ctx.currentTime + start + dur + 0.05);
+  } catch (e) {}
+}
+var snd = {
+  correct: function(){ toneAt(880,0,0.12); toneAt(1318,0.12,0.22); },
+  wrong:   function(){ toneAt(196,0,0.3,"sawtooth",0.08); },
+  depart:  function(){ toneAt(659,0,0.15); toneAt(587,0.18,0.15); toneAt(523,0.36,0.3); },
+  tick:    function(){ toneAt(1046,0,0.05,"square",0.05); },
+  fanfare: function(){ toneAt(523,0,0.15); toneAt(659,0.15,0.15); toneAt(784,0.3,0.15); toneAt(1046,0.45,0.4); }
+};
+
+// ---- 状態 ----
+var S = {};
+var timerId = null;
+function resetState() {
+  S = { phase: "title", rounds: [], idx: 0, picked: null, score: 0,
+        streak: 0, maxStreak: 0, results: [], timeLeft: 10, limit: 10,
+        distance: 0, gained: 0 };
+}
+resetState();
+
+function stopTimer() { if (timerId) { clearInterval(timerId); timerId = null; } }
+function startTimer() {
+  stopTimer();
+  var t = timeForStreak(S.streak);
+  S.limit = t; S.timeLeft = t;
+  timerId = setInterval(function () {
+    S.timeLeft--;
+    if (S.timeLeft > 0 && S.timeLeft <= 3) snd.tick();
+    if (S.timeLeft <= 0) {
+      stopTimer();
+      S.picked = "timeout"; S.gained = 0; S.streak = 0;
+      S.results[S.idx] = false;
+      snd.depart();
+    }
+    render();
+  }, 1000);
+}
+
+function startGame() {
+  ensureAudio();
+  resetState();
+  S.phase = "play";
+  S.rounds = buildRounds();
+  S.results = new Array(TOTAL).fill(null);
+  render();
+  startTimer();
+}
+function pick(which) {
+  if (S.picked) return;
+  stopTimer();
+  S.picked = which;
+  var ok = which === "real";
+  S.results[S.idx] = ok;
+  if (ok) {
+    var km = (20 + Math.max(0, S.timeLeft) * 5) * rankMult(S.streak);
+    if (S.rounds[S.idx].fog) km *= 1.5;
+    km = Math.round(km);
+    S.gained = km; S.distance += km; S.score++;
+    S.streak++; if (S.streak > S.maxStreak) S.maxStreak = S.streak;
+    snd.correct();
+  } else {
+    S.gained = 0; S.streak = 0; snd.wrong();
+  }
+  render();
+}
+function nextRound() {
+  if (S.idx + 1 >= TOTAL) { S.phase = "result"; snd.fanfare(); render(); }
+  else { S.idx++; S.picked = null; render(); startTimer(); }
+}
+function quitToTitle() { stopTimer(); S.phase = "title"; render(); }
+function toggleMute() { muted = !muted; render(); }
+function copyShare() {
+  var t = titleForScore(S.score), rk = trainRank(S.maxStreak);
+  var text = "「実在する駅名はどっち?」で " + S.distance + "km 旅しました(" + S.score + "/10正解・最高" + rk.name + ")称号:" + t.name + "\n#AI協働実験室\n" + location.href;
+  function done() {
+    var b = document.getElementById("share-btn");
+    if (b) { b.textContent = "コピーしました"; setTimeout(function(){ if (b) b.textContent = "結果をコピーして自慢する"; }, 2000); }
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(function(){ legacyCopy(text); done(); });
+  } else { legacyCopy(text); done(); }
+}
+function legacyCopy(text) {
+  try {
+    var ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    document.execCommand("copy"); document.body.removeChild(ta);
+  } catch (e) {}
+}
+
+// ---- 描画部品 ----
+function esc(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+function lineMapHtml(results, current) {
+  var h = '<div style="display:flex;align-items:center;justify-content:space-between;padding:0 2px;margin:2px 0 12px;">';
+  for (var i = 0; i < TOTAL; i++) {
+    var r = results[i];
+    var bg = r === true ? "#2E7D46" : r === false ? "#B3342E" : "#FBFAF7";
+    var bd = i === current ? "2px solid #1B2A52" : "1.5px solid #9A9892";
+    var anim = i === current ? "animation:pulse 1.2s ease infinite;" : "";
+    h += '<div style="display:flex;align-items:center;' + (i === TOTAL-1 ? 'flex:0 0 auto;' : 'flex:1;') + '">'
+      + '<div style="width:16px;height:16px;border-radius:50%;background:' + bg + ';border:' + bd + ';box-sizing:border-box;' + anim
+      + 'display:flex;align-items:center;justify-content:center;color:#FBFAF7;font-size:10px;font-weight:900;">'
+      + (r === false ? "×" : "") + '</div>';
+    if (i < TOTAL - 1) h += '<div style="flex:1;height:3px;background:#9A9892;"></div>';
+    h += '</div>';
+  }
+  return h + '</div>';
+}
+
+function journeyHtml(distance, emoji, compact) {
+  var pct = Math.min(distance, MAP_MAX) / MAP_MAX * 100;
+  var top = compact ? 18 : 22, h = compact ? 30 : 36, dotTop = compact ? 4 : 6, trainTop = compact ? 6 : 8;
+  var out = '<div style="margin:' + (compact ? "0 0 12px" : "14px 0 4px") + ';"><div style="position:relative;height:' + h + 'px;">'
+    + '<div style="position:absolute;left:0;right:0;top:' + top + 'px;height:4px;background:repeating-linear-gradient(90deg,#8A8983 0 8px,#CFCDC6 8px 12px);border-radius:2px;"></div>';
+  MILESTONES.forEach(function (m) {
+    var passed = distance >= m.km;
+    out += '<div style="position:absolute;left:' + (m.km / MAP_MAX * 100) + '%;top:0;transform:translateX(-50%);text-align:center;">'
+      + '<div style="font-size:9px;color:' + (passed ? "#1B2A52" : "#9A9892") + ';font-weight:' + (passed ? 900 : 500) + ';white-space:nowrap;">' + m.label + '</div>'
+      + '<div style="width:7px;height:7px;border-radius:50%;background:' + (passed ? "#1B2A52" : "#CFCDC6") + ';border:1.5px solid #8A8983;margin:' + dotTop + 'px auto 0;"></div></div>';
+  });
+  out += '<div style="position:absolute;left:' + pct + '%;top:' + trainTop + 'px;transform:translateX(-50%);font-size:' + (compact ? 15 : 18) + 'px;transition:left 0.7s ease;">' + emoji + '</div>';
+  return out + '</div></div>';
+}
+
+function signHtml(station, isReal, state, key, fog) {
+  var hideKana = fog === "kana" && state === "idle";
+  var hideKanji = fog === "kanji" && state === "idle";
+  var cls = "sign" + (state === "correct" ? " correct" : state === "wrong" ? " wrong" : "");
+  var h = '<button class="' + cls + '" data-pick="' + key + '">'
+    + '<div class="kana' + (hideKana ? " hidden-txt" : "") + '">' + (hideKana ? "・・・・・" : esc(station.kana)) + '</div>'
+    + '<div class="kanji' + (hideKanji ? " hidden-txt" : "") + '">' + (hideKanji ? "〓〓〓".slice(0, station.kanji.length) + (station.kanji.length > 3 ? "〓".repeat(station.kanji.length - 3) : "") : esc(station.kanji)) + '</div>'
+    + '<div class="romaji' + ((hideKana || hideKanji) ? " hidden-txt" : "") + '">' + ((hideKana || hideKanji) ? "— — —" : esc(station.romaji)) + '</div>';
+  if (state !== "idle") {
+    h += '<div class="ribbon" style="background:' + (isReal ? "#2E7D46" : "#8A8983") + ';">';
+    if (isReal) {
+      h += '<div>実在 — ' + esc(station.line) + '(' + esc(station.pref) + ')</div>';
+      if (station.trivia) h += '<div style="font-weight:500;font-size:11.5px;opacity:0.95;margin-top:2px;">' + esc(station.trivia) + '</div>';
+    } else {
+      h += '<div>架空 — AIが生成した駅名</div>';
+    }
+    h += '</div>';
+  }
+  return h + '<div class="stripe"></div></button>';
+}
+
+// ---- 画面 ----
+function render() {
+  var app = document.getElementById("app");
+  if (S.phase === "title") { app.innerHTML = titleScreen(); bindTitle(); }
+  else if (S.phase === "play") { app.innerHTML = playScreen(); bindPlay(); }
+  else { app.innerHTML = resultScreen(); bindResult(); }
+}
+
+function titleScreen() {
+  return '<div style="text-align:center;padding-top:36px;">'
+    + '<div style="font-size:13px;letter-spacing:0.4em;color:#6B6A65;margin-bottom:14px;">AI協働実験室 — 実験①</div>'
+    + '<div style="background:#FBFAF7;border:1px solid #C9C7C0;border-radius:12px;box-shadow:0 4px 14px rgba(0,0,0,0.12);padding:26px 18px 0;">'
+    + '<div style="font-size:14px;letter-spacing:0.3em;color:#3A3A3A;">じつざいするえきめいは</div>'
+    + '<div style="font-size:44px;font-weight:900;color:#111;margin:4px 0 2px;">どっち?</div>'
+    + '<div style="font-size:12px;letter-spacing:0.2em;color:#555;margin-bottom:18px;">REAL OR AI-MADE</div>'
+    + '<div style="height:8px;background:linear-gradient(90deg,#2E7D46,#3E9A5C);margin:0 -18px;"></div></div>'
+    + '<div style="font-size:14px;line-height:1.9;color:#3A3A3A;margin-top:22px;text-align:left;">'
+    + '駅名標が2枚。片方は<strong>実在する駅</strong>、もう片方はAIが作った架空の駅。実在する方をタップしてください。'
+    + '<div style="margin-top:8px;font-size:13px;color:#555;">'
+    + '⏱ 発車まで10秒。速い列車ほど発車も早い(のぞみは5秒)<br>'
+    + '🚄 連続正解で列車がランクアップ&獲得距離が最大3倍…?<br>'
+    + '📏 速く答えるほど遠くへ進める。総移動距離があなたのスコア<br>'
+    + '🌫❄ ときどき悪天候で駅名の一部が見えなくなる(距離1.5倍)</div></div>'
+    + '<button id="start-btn" class="btn-primary" style="margin-top:18px;">改札を通る</button>'
+    + '<p style="font-size:11px;color:#8A8983;margin-top:14px;line-height:1.7;">※架空駅名は作成時点で実在しないよう確認していますが、日本には約9,000の駅があります。万一実在したらそれはもう運命です。</p>'
+    + '</div>';
+}
+function bindTitle() {
+  document.getElementById("start-btn").addEventListener("click", startGame);
+}
+
+function playScreen() {
+  var cur = S.rounds[S.idx];
+  var rank = trainRank(S.streak);
+  var first = cur.realFirst ? { st: cur.real, isReal: true, key: "real" } : { st: cur.fake, isReal: false, key: "fake" };
+  var second = cur.realFirst ? { st: cur.fake, isReal: false, key: "fake" } : { st: cur.real, isReal: true, key: "real" };
+  var timePct = Math.max(0, S.timeLeft) / S.limit * 100;
+  var timeColor = S.timeLeft <= 3 ? "#B3342E" : "#1B2A52";
+  function stateOf(key) {
+    if (!S.picked) return "idle";
+    if (S.picked === "timeout") return "reveal";
+    if (key === S.picked) return key === "real" ? "correct" : "wrong";
+    return "reveal";
+  }
+  var h = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
+    + '<div style="font-size:12px;color:#6B6A65;">第' + (S.idx + 1) + '問 / ' + TOTAL
+    + ' <span style="margin-left:6px;font-weight:900;color:#1B2A52;">' + S.distance + 'km</span></div>'
+    + '<div style="display:flex;align-items:center;gap:8px;">'
+    + '<div style="font-size:12px;font-weight:900;color:#FBFAF7;background:' + rank.color + ';border-radius:20px;padding:3px 10px;">'
+    + rank.emoji + ' ' + rank.name + (S.streak >= 2 ? " ×" + S.streak : "") + '</div>'
+    + '<button id="mute-btn" style="border:none;background:transparent;font-size:16px;cursor:pointer;">' + (muted ? "🔇" : "🔊") + '</button></div></div>'
+    + lineMapHtml(S.results, S.idx)
+    + journeyHtml(S.distance, rank.emoji, true);
+
+  if (cur.fog && !S.picked) {
+    h += '<div style="font-size:12.5px;font-weight:700;color:#FBFAF7;background:' + (cur.fog === "kana" ? "#5B5A56" : "#4A6B8A") + ';border-radius:6px;padding:6px 10px;margin-bottom:8px;text-align:center;">'
+      + (cur.fog === "kana" ? "🌫 濃霧区間 — 読み仮名が見えない(獲得距離1.5倍)" : "❄ 吹雪区間 — 漢字が見えない。読みだけで見抜け(獲得距離1.5倍)") + '</div>';
+  }
+
+  h += '<div style="margin-bottom:12px;">'
+    + '<div style="display:flex;justify-content:space-between;font-size:12px;color:' + timeColor + ';font-weight:700;margin-bottom:3px;">'
+    + '<span>🚉 実在する駅はどっち?</span><span>' + (S.picked ? "" : "発車まで " + Math.max(0, S.timeLeft) + " 秒") + '</span></div>'
+    + '<div style="height:6px;background:#CFCDC6;border-radius:4px;overflow:hidden;">'
+    + '<div style="height:100%;width:' + (S.picked ? 0 : timePct) + '%;background:' + timeColor + ';transition:width 1s linear, background 0.3s;"></div></div></div>'
+    + '<div style="display:flex;flex-direction:column;gap:13px;">'
+    + signHtml(first.st, first.isReal, stateOf(first.key), first.key, cur.fog)
+    + signHtml(second.st, second.isReal, stateOf(second.key), second.key, cur.fog)
+    + '</div>';
+
+  if (S.picked) {
+    var msg = S.picked === "real"
+      ? '正解! <span style="color:#1B2A52;">+' + S.gained + 'km</span>' + (S.streak >= 2 ? '(' + S.streak + '連続)' : '')
+      : S.picked === "timeout" ? "発車しました…(時間切れ)" : "残念、それはAIの駅…";
+    h += '<div style="text-align:center;margin-top:14px;">'
+      + '<div style="font-size:19px;font-weight:900;color:' + (S.picked === "real" ? "#2E7D46" : "#B3342E") + ';">' + msg + '</div>'
+      + '<button id="next-btn" class="btn-primary" style="margin-top:10px;">' + (S.idx + 1 >= TOTAL ? "結果を見る" : "次の駅へ") + '</button></div>';
+  }
+
+  h += '<div style="text-align:center;margin-top:18px;"><button id="quit-btn" class="link-quit">🚪 途中下車する(最初の画面に戻る)</button></div>';
+  return h;
+}
+function bindPlay() {
+  var picks = document.querySelectorAll("[data-pick]");
+  for (var i = 0; i < picks.length; i++) {
+    (function (el) {
+      el.addEventListener("click", function () { pick(el.getAttribute("data-pick")); });
+    })(picks[i]);
+  }
+  var nb = document.getElementById("next-btn");
+  if (nb) nb.addEventListener("click", nextRound);
+  document.getElementById("quit-btn").addEventListener("click", quitToTitle);
+  document.getElementById("mute-btn").addEventListener("click", toggleMute);
+}
+
+function resultScreen() {
+  var t = titleForScore(S.score), rk = trainRank(S.maxStreak);
+  return '<div style="text-align:center;padding-top:26px;">'
+    + '<div style="font-size:13px;letter-spacing:0.4em;color:#6B6A65;margin-bottom:12px;">けっか</div>'
+    + '<div style="background:#FBFAF7;border:1px dashed #8A8983;border-radius:6px;padding:20px 18px;box-shadow:0 4px 14px rgba(0,0,0,0.12);">'
+    + '<div style="font-size:12px;letter-spacing:0.3em;color:#6B6A65;">乗車券 — AI協働実験室線</div>'
+    + '<div style="font-size:48px;font-weight:900;color:#111;margin:6px 0 0;">' + S.distance + '<span style="font-size:20px;font-weight:700;color:#555;"> km</span></div>'
+    + '<div style="font-size:13px;font-weight:700;color:#2E7D46;margin-top:2px;">' + distanceComment(S.distance) + '</div>'
+    + '<div style="font-size:14px;color:#555;margin-top:8px;">正解 ' + S.score + ' / ' + TOTAL + '</div>'
+    + '<div style="font-size:21px;font-weight:900;color:#1B2A52;margin-top:6px;">称号:' + t.name + '</div>'
+    + '<div style="font-size:13px;color:#555;margin-top:4px;">' + t.desc + '</div>'
+    + '<div style="margin-top:12px;font-size:13px;font-weight:700;color:#FBFAF7;background:' + rk.color + ';border-radius:20px;display:inline-block;padding:4px 14px;">最高乗車列車:' + rk.emoji + ' ' + rk.name + '(最大' + S.maxStreak + '連続)</div>'
+    + journeyHtml(S.distance, rk.emoji, false)
+    + '<div style="margin-top:8px;">' + lineMapHtml(S.results, -1) + '</div>'
+    + '</div>'
+    + '<button id="share-btn" class="btn-outline" style="margin-top:16px;">結果をコピーして自慢する</button>'
+    + '<button id="again-btn" class="btn-primary" style="margin-top:10px;">もう一度乗車する</button>'
+    + '<button id="menu-btn" class="btn-ghost" style="margin-top:10px;">🚪 改札を出る(メニューに戻る)</button>'
+    + '</div>';
+}
+function bindResult() {
+  document.getElementById("share-btn").addEventListener("click", copyShare);
+  document.getElementById("again-btn").addEventListener("click", startGame);
+  document.getElementById("menu-btn").addEventListener("click", quitToTitle);
+}
+
+render();
+</script>
+</body>
+</html>
